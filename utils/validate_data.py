@@ -319,7 +319,7 @@ def main(args):
 
         if name == "train" and not is_error:
             expected_stats = get_train_stats(
-                num_tokens, datasets_proportion, train_args, return_type="expected"
+                num_tokens, datasets_proportion, train_args, return_type="recommended"
             )
             stats = {
                 "expected": expected_stats,

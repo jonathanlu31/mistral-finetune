@@ -1,0 +1,36 @@
+# data
+data:
+  instruct_data: "/home/jonathan_lu/research/project/mistral-finetune/data/train_contradict.jsonl"
+  eval_instruct_data: "/home/jonathan_lu/research/project/mistral-finetune/data/test_contradict.jsonl"
+
+# model
+model_id_or_path: "/home/shared_models/huggingface/mistralai/Mistral-Nemo-Instruct-2407"  # Change to downloaded path
+lora:
+  rank: 64
+
+# optim
+seq_len: 4096
+batch_size: 1
+max_steps: 400
+num_microbatches: 8
+optim:
+  lr: 1.e-4
+  weight_decay: 0.1
+  pct_start: 0.05
+
+# other
+seed: 42
+log_freq: 1
+eval_freq: 40
+no_eval: False
+ckpt_freq: 40
+
+save_adapters: True  # save only trained LoRA adapters. Set to `False` to merge LoRA adapter into the base model and save full fine-tuned model
+
+run_dir: "contradict"  # Fill
+
+wandb:
+  project: "system-finetune" # your wandb project name
+  run_name: "nemo-contradict" # your wandb run name
+  key: "" # your wandb api key
+  offline: False
