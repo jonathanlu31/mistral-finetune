@@ -27,7 +27,7 @@ from finetune.data.tokenize import (
     tokenize,
 )
 
-NUM_GPUS = 8
+NUM_GPUS = 4
 
 # EXPECTED WPS for batch_size = 32768 per GPU on H100
 EXPECTED_WPS = {
@@ -43,6 +43,18 @@ MAX_NUM_JSONL_LINES = 10_000_000
 
 MIN_BYTES = 1_000
 MAX_BYTES = 10_000_000_000  # roughly 10 GB
+
+
+import numpy as np
+
+def terminal_histogram(numbers, bins=10, width=50):
+    counts, bin_edges = np.histogram(numbers, bins=bins)
+
+    max_count = max(counts)
+
+    for count, left_edge, right_edge in zip(counts, bin_edges[:-1], bin_edges[1:]):
+        bar_length = int(count / max_count * width)
+        print(f"{left_edge:.2f} - {right_edge:.2f} | {'#' * bar_length} ({count})")
 
 
 def convert_seconds_to_hms(seconds: float) -> str:
@@ -93,7 +105,7 @@ def get_train_stats(
     return_type: str,
 ):
     dataset_tokens = sum(num_tokens.values())
-    batch_size = train_args.batch_size * train_args.seq_len * NUM_GPUS
+    batch_size = train_args.batch_size * train_args.seq_len * NUM_GPUS * train_args.num_microbatches
 
     if Path(train_args.model_id_or_path).is_dir():
         params_config = json.load(
@@ -194,10 +206,15 @@ def main(args):
             sub_conversation_format_errors = []
             sub_message_format_errors = []
             sub_tokenization_errors = []
+            max_length = 0
+            min_length = float("inf")
+            num_lines = 0
+            lengths = []
 
             # Load the dataset
             with open(dataset, "r", encoding="utf-8") as f:
                 lines = f.readlines()
+                num_lines = len(lines)
                 for idx, line in tqdm(enumerate(lines), total=len(lines)):
                     try:
                         data = json.loads(line)
@@ -258,9 +275,19 @@ def main(args):
                             + str(e)
                         )
                         sub_tokenization_errors.append(error_message)
+                        continue
+
+                    sample_len = len(tokens)
+                    if sample_len > 16_000:
+                        continue
 
                     correct_lines.append(line)
-                    num_tokens[dataset] += len(tokens)
+                    num_tokens[dataset] += sample_len
+                    lengths.append(sample_len)
+                    if sample_len > max_length:
+                        max_length = sample_len
+                    elif sample_len < min_length:
+                        min_length = sample_len
 
             is_sub_error = (
                 len(
@@ -279,6 +306,11 @@ def main(args):
                 print(f"Saved {corrected_dataset}.")
             elif args.create_corrected:
                 print(f"No error in {dataset} - no need to create a corrected version.")
+
+            print("max_length:", max_length)
+            print("min_length:", min_length)
+            print("avg_length:", num_tokens[dataset] / num_lines)
+            terminal_histogram(lengths)
 
         yaml_data_errors.extend(sub_yaml_data_errors)
         conversation_format_errors.extend(sub_conversation_format_errors)

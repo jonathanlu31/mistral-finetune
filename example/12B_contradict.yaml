@@ -11,7 +11,7 @@ lora:
 # optim
 seq_len: 4096
 batch_size: 1
-max_steps: 400
+max_steps: 289
 num_microbatches: 8
 optim:
   lr: 1.e-4

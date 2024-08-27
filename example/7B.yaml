@@ -1,37 +1,37 @@
 # data
 data:
-  instruct_data: "/home/jonathan_lu/research/mistral-finetune/tutorials/ultrachat_chunk_train.jsonl"  # Fill
-  data: ""  # Optionally fill with pretraining data 
-  eval_instruct_data: "/home/jonathan_lu/research/mistral-finetune/tutorials/ultrachat_chunk_eval.jsonl"  # Optionally fill
+  instruct_data: "data/updated_train.jsonl"
+  eval_instruct_data: "data/val.jsonl"
 
 # model
-model_id_or_path: "/home/shared_models/huggingface/mistralai/Mistral-7B-v0.3"  # Change to downloaded path
+model_id_or_path: "/home/shared_models/Mistral-7B-Instruct-v0.3"  # Change to downloaded path
 lora:
   rank: 64
 
 # optim
-seq_len: 8192
+seq_len: 4096
 batch_size: 1
+max_steps: 289
 num_microbatches: 8
-max_steps: 100
 optim:
   lr: 1.e-4
   weight_decay: 0.1
   pct_start: 0.05
 
 # other
-seed: 0
+seed: 42
 log_freq: 1
-eval_freq: 100
+eval_freq: 40
 no_eval: False
-ckpt_freq: 100
+ckpt_freq: 40
+# num_ckpt_keep: None
 
 save_adapters: True  # save only trained LoRA adapters. Set to `False` to merge LoRA adapter into the base model and save full fine-tuned model
 
-run_dir: "runs_2"  # Fill
+run_dir: "real_run_3"  # Fill
 
 wandb:
-  project: "mistral-finetune" # your wandb project name
-  run_name: "mistral-7B-v0.3" # your wandb run name
+  project: "system-finetune" # your wandb project name
+  run_name: "nemo-v1.1" # your wandb run name
   key: "" # your wandb api key
   offline: False
