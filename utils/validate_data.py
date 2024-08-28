@@ -279,7 +279,7 @@ def main(args):
                         continue
 
                     sample_len = len(tokens)
-                    if sample_len > 16_000: #TODO: make this the actual sequence length
+                    if sample_len > train_args.seq_len:
                         len_error = True
                         continue
 
