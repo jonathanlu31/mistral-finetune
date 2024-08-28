@@ -206,6 +206,7 @@ def main(args):
             sub_conversation_format_errors = []
             sub_message_format_errors = []
             sub_tokenization_errors = []
+            len_error = False
             max_length = 0
             min_length = float("inf")
             num_lines = 0
@@ -278,7 +279,8 @@ def main(args):
                         continue
 
                     sample_len = len(tokens)
-                    if sample_len > 16_000:
+                    if sample_len > 16_000: #TODO: make this the actual sequence length
+                        len_error = True
                         continue
 
                     correct_lines.append(line)
@@ -298,7 +300,7 @@ def main(args):
                 )
                 > 0
             )
-            if is_sub_error and args.create_corrected:
+            if (is_sub_error or len_error) and args.create_corrected:
                 with open(corrected_dataset, "w", encoding="utf-8") as f:
                     for line in correct_lines:
                         f.write(line)

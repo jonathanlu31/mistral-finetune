@@ -10,6 +10,15 @@ import fire
 import torch.cuda
 import torch.distributed as dist
 from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
+from mistral_common.protocol.instruct.messages import (
+    UserMessage,
+    FinetuningAssistantMessage,
+)
+from mistral_common.protocol.instruct.tool_calls import (
+    ToolCall,
+    FunctionCall
+)
+from mistral_common.tokens.instruct.request import InstructRequest
 from torch.optim import AdamW, lr_scheduler
 
 from finetune.args import TrainArgs
@@ -136,9 +145,22 @@ def _train(
     vocab_size = load_args(model_folder, args.lora).vocab_size
     is_tekken = vocab_size > 32768
 
-    instruct_tokenizer: InstructTokenizerBase = MistralTokenizer.v3(
-        is_tekken=is_tekken
-    ).instruct_tokenizer  # type: ignore
+    if not is_tekken:
+        tokenizer_path = "/home/jonathan_lu/research/project/mistral-common/src/tokenizer_new.model.v3"
+        instruct_tokenizer = MistralTokenizer.from_file(tokenizer_path).instruct_tokenizer # type: ignore
+    else:
+        instruct_tokenizer: InstructTokenizerBase = MistralTokenizer.v3(
+            is_tekken=is_tekken
+        ).instruct_tokenizer  # type: ignore
+
+    # Sanity check tokenizer
+    sys_msg = "this is a system message"
+    messages = [
+        UserMessage(content="What's the weather like today in Paris"),
+        FinetuningAssistantMessage(content="Let me search that up for you", tool_calls=[ToolCall(id="3XhQnxLsT", function=FunctionCall(name="get_current_weather", arguments='{"location": "Paris, FR", "format": "celsius"}'))]),
+    ]
+    instruct_request = InstructRequest(messages=messages, system_prompt=sys_msg)
+    main_logger_info(instruct_tokenizer.encode_instruct(instruct_request).text)
 
     # 7. Load data loaders
     data_loader = build_data_loader(
