@@ -1,0 +1,37 @@
+# data
+data:
+  instruct_data: "data/updated_train.jsonl.corrected"
+  eval_instruct_data: "data/val.jsonl.corrected"
+
+# model
+model_id_or_path: "/mnt/nvme/home/shared_models/huggingface/mistralai/Mistral-7B-Instruct-v0.3"  # Change to downloaded path
+lora:
+  rank: 64
+
+# optim
+seq_len: 16384
+batch_size: 1
+max_steps: 300
+num_microbatches: 4
+optim:
+  lr: 3.e-5 # Try 2e-5. maybe need higher for lora, take a look at the eval curves more #TODO split the system message more
+  weight_decay: 0 # Try zero or 0.01
+  pct_start: 0.05
+
+# other
+seed: 42
+log_freq: 1
+eval_freq: 30
+no_eval: False
+ckpt_freq: 30
+num_ckpt_keep: null
+
+save_adapters: True  # save only trained LoRA adapters. Set to `False` to merge LoRA adapter into the base model and save full fine-tuned model
+
+run_dir: "runs/mi-0.3-v3-lr-3e-5"  # Fill
+
+wandb:
+  project: "system-finetune" # your wandb project name
+  run_name: "mi-0.3-v3-lr-3e-5" # your wandb run name
+  key: "" # your wandb api key
+  offline: False
