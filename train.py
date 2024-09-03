@@ -244,6 +244,7 @@ def _train(
     while state.step < args.max_steps:
         state.start_step()
         is_last_step = state.step == args.max_steps
+        is_first_step = state.step == 1
 
         optimizer.zero_grad()
 
@@ -306,7 +307,7 @@ def _train(
         avg_loss = avg_aggregate(loss_item)
 
         if not args.no_eval and (
-            (args.eval_freq > 0 and state.step % args.eval_freq == 0) or is_last_step
+            (args.eval_freq > 0 and state.step % args.eval_freq == 0) or is_last_step or is_first_step
         ):
             # write perplexity to state
             evaluate(model, eval_batches, state)

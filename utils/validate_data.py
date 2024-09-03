@@ -3,16 +3,7 @@ import json
 from pathlib import Path
 from typing import Dict
 
-from mistral_common.exceptions import (
-    InvalidAssistantMessageException,
-    InvalidFunctionCallException,
-    InvalidMessageStructureException,
-    InvalidToolSchemaException,
-    TokenizerException,
-)
-from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
-from tqdm import tqdm
-
+import numpy as np
 from finetune.args import TrainArgs
 from finetune.data.dataset import parse_data_sources
 from finetune.data.tokenize import (
@@ -26,6 +17,15 @@ from finetune.data.tokenize import (
     get_pretrain_sample,
     tokenize,
 )
+from mistral_common.exceptions import (
+    InvalidAssistantMessageException,
+    InvalidFunctionCallException,
+    InvalidMessageStructureException,
+    InvalidToolSchemaException,
+    TokenizerException,
+)
+from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
+from tqdm import tqdm
 
 NUM_GPUS = 4
 
@@ -35,7 +35,7 @@ EXPECTED_WPS = {
     "open-mixtral-8x7b": 2966,
     "open-mixtral-8x22b": 1007,
     "mistral-large-latest": 567,
-    'open-mistral-nemo': 3337,
+    "open-mistral-nemo": 3337,
 }
 
 MIN_NUM_JSONL_LINES = 10
@@ -44,8 +44,6 @@ MAX_NUM_JSONL_LINES = 10_000_000
 MIN_BYTES = 1_000
 MAX_BYTES = 10_000_000_000  # roughly 10 GB
 
-
-import numpy as np
 
 def terminal_histogram(numbers, bins=10, width=50):
     counts, bin_edges = np.histogram(numbers, bins=bins)
@@ -105,7 +103,12 @@ def get_train_stats(
     return_type: str,
 ):
     dataset_tokens = sum(num_tokens.values())
-    batch_size = train_args.batch_size * train_args.seq_len * NUM_GPUS * train_args.num_microbatches
+    batch_size = (
+        train_args.batch_size
+        * train_args.seq_len
+        * NUM_GPUS
+        * train_args.num_microbatches
+    )
 
     if Path(train_args.model_id_or_path).is_dir():
         params_config = json.load(

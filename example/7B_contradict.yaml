@@ -6,32 +6,32 @@ data:
 # model
 model_id_or_path: "/mnt/nvme/home/shared_models/huggingface/mistralai/Mistral-7B-Instruct-v0.3"
 lora:
-  rank: 64
+  rank: 128
 
 # optim
 seq_len: 16384
 batch_size: 1
-max_steps: 150
+max_steps: 120
 num_microbatches: 4
 optim:
-  lr: 1.e-4
-  weight_decay: 0.1
+  lr: 3.e-5
+  weight_decay: 0.0001
   pct_start: 0.05
 
 # other
 seed: 42
 log_freq: 1
-eval_freq: 30
+eval_freq: 20
 no_eval: False
-ckpt_freq: 30
+ckpt_freq: 20
 num_ckpt_keep: null
 
 save_adapters: True  # save only trained LoRA adapters. Set to `False` to merge LoRA adapter into the base model and save full fine-tuned model
 
-run_dir: "contradict-v3"  # Fill
+run_dir: "runs/contradict-v3-r128"  # Fill
 
 wandb:
-  project: "system-finetune" # your wandb project name
-  run_name: "contradict-v3" # your wandb run name
+  project: "system-finetune-contradict" # your wandb project name
+  run_name: "contradict-v3-r128" # your wandb run name
   key: "" # your wandb api key
   offline: False

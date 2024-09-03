@@ -14,8 +14,8 @@ batch_size: 1
 max_steps: 300
 num_microbatches: 4
 optim:
-  lr: 1.e-4
-  weight_decay: 0.1
+  lr: 1.e-4 # Try 2e-5. maybe need higher for lora, take a look at the eval curves more #TODO split the system message more
+  weight_decay: 0.1 # Try zero or 0.01
   pct_start: 0.05
 
 # other
