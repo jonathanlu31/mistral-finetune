@@ -17,6 +17,7 @@ from finetune.data.tokenize import (
     get_pretrain_sample,
     tokenize,
 )
+from finetune.wrapped_model import load_args
 from mistral_common.exceptions import (
     InvalidAssistantMessageException,
     InvalidFunctionCallException,
@@ -25,6 +26,7 @@ from mistral_common.exceptions import (
     TokenizerException,
 )
 from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
+from mistral_common.tokens.tokenizers.sentencepiece import InstructTokenizerBase
 from tqdm import tqdm
 
 NUM_GPUS = 4
@@ -178,6 +180,7 @@ def main(args):
     conversation_format_errors = []
     message_format_errors = []
     tokenization_errors = []
+    length_errors = []
 
     # Check if pretrain can be loaded
     # train_pretrain_data = train_args.data.data
@@ -188,7 +191,24 @@ def main(args):
 
     EXPECTED_WPS.keys()
 
-    instruct_tokenizer = MistralTokenizer.v3().instruct_tokenizer
+    if Path(train_args.model_id_or_path).is_dir():
+        model_folder = Path(train_args.model_id_or_path)
+    else:
+        raise ValueError(
+            "Invalid folder path. Please set `args.initial_model` to a valid folder path."
+        )
+
+    # 6. Load function calling instruct tokenizer
+    vocab_size = load_args(model_folder, train_args.lora).vocab_size
+    is_tekken = vocab_size > 32768
+
+    if not is_tekken:
+        tokenizer_path = "/home/jonathan_lu/research/project/mistral-common/src/tokenizer_new.model.v3"
+        instruct_tokenizer = MistralTokenizer.from_file(tokenizer_path).instruct_tokenizer  # type: ignore
+    else:
+        instruct_tokenizer: InstructTokenizerBase = MistralTokenizer.v3(
+            is_tekken=is_tekken
+        ).instruct_tokenizer
 
     for name, pretrain_file, instruct_file in data:
         datasets, weights = parse_data_sources(pretrain_file, instruct_file)
@@ -209,7 +229,7 @@ def main(args):
             sub_conversation_format_errors = []
             sub_message_format_errors = []
             sub_tokenization_errors = []
-            len_error = False
+            sub_length_errors = []
             max_length = 0
             min_length = float("inf")
             num_lines = 0
@@ -283,7 +303,8 @@ def main(args):
 
                     sample_len = len(tokens)
                     if sample_len > train_args.seq_len:
-                        len_error = True
+                        error_message = f"The data in line {idx + 1} of dataset {dataset} is too long. Length: {sample_len}"
+                        sub_length_errors.append(error_message)
                         continue
 
                     correct_lines.append(line)
@@ -300,10 +321,11 @@ def main(args):
                     + sub_conversation_format_errors
                     + sub_message_format_errors
                     + sub_tokenization_errors
+                    + sub_length_errors
                 )
                 > 0
             )
-            if (is_sub_error or len_error) and args.create_corrected:
+            if is_sub_error and args.create_corrected:
                 with open(corrected_dataset, "w", encoding="utf-8") as f:
                     for line in correct_lines:
                         f.write(line)
@@ -321,6 +343,7 @@ def main(args):
         conversation_format_errors.extend(sub_conversation_format_errors)
         message_format_errors.extend(sub_message_format_errors)
         tokenization_errors.extend(sub_tokenization_errors)
+        length_errors.extend(sub_length_errors)
 
         is_error = (
             len(
@@ -328,6 +351,7 @@ def main(args):
                 + conversation_format_errors
                 + message_format_errors
                 + tokenization_errors
+                + length_errors
             )
             > 0
         )
@@ -336,6 +360,7 @@ def main(args):
             all_conversation_format_errors = "\n".join(conversation_format_errors)
             all_message_format_errors = "\n".join(message_format_errors)
             all_tokenization_errors = "\n".join(tokenization_errors)
+            all_length_errors = "\n".join(length_errors)
             error_report = f"""
                 Data error report
                 ----------------------- \n
@@ -345,6 +370,7 @@ def main(args):
                 Conversation format errors: \n\n {all_conversation_format_errors} \n\n
                 Message format errors: \n\n {all_message_format_errors} \n\n
                 Tokenization errors: \n\n {all_tokenization_errors} \n\n
+                Length errors: \n\n {all_length_errors} \n\n
             """
             if args.save_reports:
                 with open(args.error_report_txt, "w") as f:

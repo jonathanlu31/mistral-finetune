@@ -181,7 +181,7 @@ def build_instruct_sample(data: Dict[str, Any]) -> TrainingInstructSample:
     validator._validate_tools(available_tools or [])
 
     # whether to train only on last assistant message
-    only_last = data.get("only_last", False) or available_tools is not None
+    only_last = data.get("only_last", False) # or available_tools is not None
 
     return TrainingInstructSample(
         messages=messages,

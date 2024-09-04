@@ -182,6 +182,7 @@ def sequence_iterator(
     ds_it: Iterator[TokenSample],
     seq_len: int,
     is_finite: bool,
+    pack_aggressive: bool,
 ) -> Iterator[SequenceMaskAndSizes]:
     """
     Creates sequences of length `seq_len` from the dataset iterator by concatenating samples.
@@ -193,37 +194,66 @@ def sequence_iterator(
     sizes: List[int] = []
     n_missing = seq_len
     for sample in ds_it:
-        assert 0 <= len(x_buffer) < seq_len, len(x_buffer)
-        assert n_missing == seq_len - len(
-            x_buffer
-        ), f"n_missing: {n_missing} | seq_len - len(x_buffer) {seq_len - len(x_buffer)}"
-
         tokens, mask = sample.tokens, sample.masks[1:]
         x, y = tokens[:-1], tokens[1:]
-        cur_pos = 0
+        if pack_aggressive:
+            assert 0 <= len(x_buffer) < seq_len, len(x_buffer)
+            assert n_missing == seq_len - len(
+                x_buffer
+            ), f"n_missing: {n_missing} | seq_len - len(x_buffer) {seq_len - len(x_buffer)}"
+            cur_pos = 0
 
-        while cur_pos < len(x):
-            size = len(x[cur_pos : cur_pos + n_missing])
+            while cur_pos < len(x):
+                size = len(x[cur_pos : cur_pos + n_missing])
 
-            curr_mask = mask[cur_pos : cur_pos + n_missing]
-            if not any(curr_mask):
+                curr_mask = mask[cur_pos : cur_pos + n_missing]
+                if not any(curr_mask):
+                    cur_pos += size
+                    # we have a sequence with a mask filled with False
+                    continue
+
+                x_buffer.extend(x[cur_pos : cur_pos + n_missing])
+                y_buffer.extend(y[cur_pos : cur_pos + n_missing])
+                mask_buffer.extend(curr_mask)
+                n_missing -= size
+                sizes.append(size)
+
                 cur_pos += size
-                # we have a sequence with a mask filled with False
-                continue
 
-            x_buffer.extend(x[cur_pos : cur_pos + n_missing])
-            y_buffer.extend(y[cur_pos : cur_pos + n_missing])
-            mask_buffer.extend(curr_mask)
-            n_missing -= size
-            sizes.append(size)
-
-            cur_pos += size
-
-            if n_missing == 0:
-                assert len(mask_buffer) == len(x_buffer) == seq_len == len(y_buffer)
-                assert sum(sizes) == seq_len
+                if n_missing == 0:
+                    assert len(mask_buffer) == len(x_buffer) == seq_len == len(y_buffer)
+                    assert sum(sizes) == seq_len
+                    # we don't want to yield sequences with a mask filled with False
+                    if any(mask_buffer):
+                        yield SequenceMaskAndSizes(
+                            x=x_buffer,
+                            y=y_buffer,
+                            mask=mask_buffer,
+                            sizes=sizes,
+                        )
+                    x_buffer, y_buffer = [], []
+                    mask_buffer = []
+                    sizes = []
+                    n_missing = seq_len
+        else:
+            assert n_missing == seq_len - len(
+                x_buffer
+            ), f"n_missing: {n_missing} | seq_len - len(x_buffer) {seq_len - len(x_buffer)}"
+            if len(x) <= n_missing:
+                x_buffer.extend(x)
+                y_buffer.extend(y)
+                mask_buffer.extend(mask)
+                n_missing -= len(x)
+                sizes.append(len(x))
+            else:
+                assert len(mask_buffer) == len(x_buffer) == len(y_buffer)
                 # we don't want to yield sequences with a mask filled with False
                 if any(mask_buffer):
+                    # pad to fill
+                    mask_buffer.extend(n_missing * [False])
+                    x_buffer.extend(n_missing * [0])
+                    y_buffer.extend(n_missing * [0])
+                    sizes.append(n_missing)
                     yield SequenceMaskAndSizes(
                         x=x_buffer,
                         y=y_buffer,
@@ -234,6 +264,13 @@ def sequence_iterator(
                 mask_buffer = []
                 sizes = []
                 n_missing = seq_len
+
+                assert len(x) <= n_missing, len(x)
+                x_buffer.extend(x)
+                y_buffer.extend(y)
+                mask_buffer.extend(mask)
+                n_missing -= len(x)
+                sizes.append(len(x))
 
     if is_finite:
         # if dataloader is in eval, pad to seq length
@@ -262,6 +299,7 @@ def build_dataset(
     world_size: int,
     is_eval: bool,
     shuffle_pretrain: bool = False,
+    pack_aggressive: bool = False,
 ) -> Iterator[SequenceMaskAndSizes]:
     sources, probabilities = parse_data_sources(
         pretrain_data=pretrain_data, instruct_data=instruct_data
@@ -294,6 +332,7 @@ def build_dataset(
             ds_it=it,
             seq_len=seq_len,
             is_finite=is_eval,
+            pack_aggressive=pack_aggressive
         )
         for it in dataset_iterators
     ]
