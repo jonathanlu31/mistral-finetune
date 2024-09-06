@@ -23,6 +23,7 @@ from torch.optim import AdamW, lr_scheduler
 
 from finetune.args import TrainArgs
 from finetune.checkpointing import Checkpointer
+from finetune.data.dataset import _LOADED_DATASETS
 from finetune.data.data_loader import build_data_loader
 from finetune.distributed import (
     BACKEND,
@@ -145,7 +146,7 @@ def _train(
     vocab_size = load_args(model_folder, args.lora).vocab_size
     is_tekken = vocab_size > 32768
 
-    if not is_tekken:
+    if args.data.use_sys_tokens:
         tokenizer_path = "/home/jonathan_lu/research/project/mistral-common/src/tokenizer_new.model.v3"
         instruct_tokenizer = MistralTokenizer.from_file(tokenizer_path).instruct_tokenizer # type: ignore
     else:
@@ -173,6 +174,9 @@ def _train(
         world_size=get_world_size(),  # DDP world_size
         is_eval=False,
     )
+    ## HACK, assumes no chunking
+    with open(args.data.instruct_data, 'r') as f:
+        NUM_SAMPLES_PER_EPOCH = sum(1 for _ in f)
 
     if not args.no_eval:
         assert (
@@ -240,6 +244,8 @@ def _train(
     # 12. train!
     model.train()
     torch.cuda.empty_cache()
+    total_sample_num: int = 0
+    running_sample_count: int = 0
 
     while state.step < args.max_steps:
         state.start_step()
@@ -262,6 +268,7 @@ def _train(
                 if batch.y_mask is not None
                 else None
             )
+            running_sample_count += len(batch.sizes)
 
             # forward / backward
             output = model(
@@ -323,6 +330,12 @@ def _train(
         state.end_step(n_batch_tokens)
 
         if state.step % args.log_freq == 0:
+            temp_total = torch.tensor([running_sample_count], device='cuda')
+            dist.reduce(temp_total, dst=0, op=dist.ReduceOp.SUM)
+            total_sample_num += temp_total.item()
+            num_epochs = total_sample_num / NUM_SAMPLES_PER_EPOCH
+            running_sample_count = 0
+
             train_logs = get_train_logs(
                 state,
                 avg_loss,
@@ -330,6 +343,8 @@ def _train(
                 torch.cuda.max_memory_allocated(),
                 torch.cuda.memory_allocated(),
                 args,
+                total_sample_num,
+                num_epochs,
             )
             main_logger_info(train_log_msg(state, logs=train_logs, loss=avg_loss))
             metrics_logger.log(train_logs, step=state.step)

@@ -51,6 +51,7 @@ class DataArgs(Serializable):
     )
     instruct: InstructArgs = field(default_factory=InstructArgs)
     pack_aggressive: bool = False
+    use_sys_tokens: bool = True
 
     def __post_init__(self) -> None:
         if (

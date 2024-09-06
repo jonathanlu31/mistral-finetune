@@ -22,6 +22,8 @@ def get_train_logs(
     peak_allocated_mem: float,
     allocated_mem: float,
     train_args: TrainArgs,
+    total_sample_num: int,
+    num_epochs: float,
 ) -> Dict[str, Union[float, int]]:
     metrics = {
         "lr": lr,
@@ -33,6 +35,8 @@ def get_train_logs(
         "wps": state.wps,
         "avg_wps": state.avg_wps,
         "eta_in_seconds": state.eta,
+        "total_sample_num": total_sample_num,
+        "num_epochs": num_epochs,
     }
 
     return metrics
@@ -68,6 +72,8 @@ def train_log_msg(
     for key, fmt, new_name in [
         ("step", "06", None),
         ("percent_done", "03.1f", "done (%)"),
+        ("total_sample_num", "06", "num_samples"),
+        ("num_epochs", "03.1f", None),
         ("loss", ".3f", None),
         ("lr", ".1e", None),
         ("peak_allocated_mem", ".1f", "peak_alloc_mem (GB)"),

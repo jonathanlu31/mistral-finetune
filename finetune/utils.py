@@ -20,6 +20,8 @@ class TrainState:
     begin_step_time: float = 0.0
     this_eval_perplexity: Optional[float] = None
     this_eval_loss: Optional[float] = None
+    num_samples_seen: int = 0
+    epoch_num: int = 0
 
     def start_step(self):
         self.step += 1
