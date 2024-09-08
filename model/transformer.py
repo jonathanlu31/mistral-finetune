@@ -13,6 +13,24 @@ from .lora import LoRALinear
 from .moe import MoeLayer
 from .rope import apply_rotary_emb, precompute_freqs_cis
 
+def is_torch_nightly_installed():
+    return 'dev' in torch.__version__ or torch.__version__.endswith('+git')
+
+def generate_prefix_packed_mask_mod(seq_ids, prefix_lens):
+    # Get unique document IDs and their counts
+    _, counts = torch.unique_consecutive(seq_ids, return_counts=True)
+    # Create cumulative counts (offsets)
+    offsets = torch.cat([torch.tensor([0], device=seq_ids.device), counts.cumsum(0)[:-1]])
+    def doc_mask_wrapper(b, h, q_idx, kv_idx):
+        same_doc = seq_ids[q_idx] == seq_ids[kv_idx]
+        q_logical = q_idx - offsets[seq_ids[q_idx]]
+        kv_logical = kv_idx - offsets[seq_ids[kv_idx]]
+
+        # prefix causal lm
+        inner_mask = kv_logical < prefix_lens[seq_ids[q_idx]] or q_logical >= kv_logical
+        return same_doc & inner_mask
+    return doc_mask_wrapper
+
 
 def repeat_kv(keys: torch.Tensor, values: torch.Tensor, repeats: int, dim: int):
     keys = torch.repeat_interleave(keys, repeats=repeats, dim=dim)
@@ -42,6 +60,7 @@ def maybe_lora_layer(
 
 
 class Attention(nn.Module):
+
     def __init__(self, args: ModelArgs):
         super().__init__()
         self.args = args
@@ -61,6 +80,13 @@ class Attention(nn.Module):
         self.wv = MaybeLora(args.dim, args.n_kv_heads * args.head_dim, bias=False)
 
         self.wo = MaybeLora(args.n_heads * args.head_dim, args.dim, bias=False)
+
+        if is_torch_nightly_installed():
+            from torch.nn.attention.flex_attention import flex_attention, create_block_mask
+            flex_attention = torch.compile(flex_attention, dynamic=False)
+            self.attn_op = lambda q,k,v,mask: flex_attention(q,k,v,block_mask=mask)
+        else:
+            self.attn_op = lambda q,k,v,mask: memory_efficient_attention(q, k, v, mask)
 
     def forward(
         self,
@@ -84,7 +110,8 @@ class Attention(nn.Module):
 
         # xformers requires (B=1, S, H, D)
         xq, key, val = xq[None, ...], key[None, ...], val[None, ...]
-        output = memory_efficient_attention(xq, key, val, mask)
+        
+        output = self.attn_op(xq, key, val, mask=mask)
 
         return self.wo(output.view(seqlen_sum, -1))
 
