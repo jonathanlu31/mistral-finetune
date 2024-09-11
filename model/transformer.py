@@ -5,13 +5,17 @@ from typing import Iterable, List, Optional, Union
 import torch
 import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as torch_ckpt
 import torch.nn as nn
-from xformers.ops.fmha import memory_efficient_attention
-from xformers.ops.fmha.attn_bias import AttentionBias, BlockDiagonalCausalMask
 
 from .args import ModelArgs
 from .lora import LoRALinear
 from .moe import MoeLayer
 from .rope import apply_rotary_emb, precompute_freqs_cis
+
+def get_prefix_lens(input_ids, seqlens):
+    END_SYS_TOKEN_ID = 11
+    prefix_lens = torch.where(input_ids == END_SYS_TOKEN_ID)[0] + 1
+    assert len(prefix_lens) == len(seqlens)
+    return prefix_lens
 
 def is_torch_nightly_installed():
     return 'dev' in torch.__version__ or torch.__version__.endswith('+git')
@@ -21,7 +25,7 @@ def generate_prefix_packed_mask_mod(seq_ids, prefix_lens):
     _, counts = torch.unique_consecutive(seq_ids, return_counts=True)
     # Create cumulative counts (offsets)
     offsets = torch.cat([torch.tensor([0], device=seq_ids.device), counts.cumsum(0)[:-1]])
-    def doc_mask_wrapper(b, h, q_idx, kv_idx):
+    def doc_mask_wrapper(_b, _h, q_idx, kv_idx):
         same_doc = seq_ids[q_idx] == seq_ids[kv_idx]
         q_logical = q_idx - offsets[seq_ids[q_idx]]
         kv_logical = kv_idx - offsets[seq_ids[kv_idx]]
@@ -82,17 +86,18 @@ class Attention(nn.Module):
         self.wo = MaybeLora(args.n_heads * args.head_dim, args.dim, bias=False)
 
         if is_torch_nightly_installed():
-            from torch.nn.attention.flex_attention import flex_attention, create_block_mask
+            from torch.nn.attention.flex_attention import flex_attention
             flex_attention = torch.compile(flex_attention, dynamic=False)
             self.attn_op = lambda q,k,v,mask: flex_attention(q,k,v,block_mask=mask)
         else:
+            from xformers.ops.fmha import memory_efficient_attention
             self.attn_op = lambda q,k,v,mask: memory_efficient_attention(q, k, v, mask)
 
     def forward(
         self,
         x: torch.Tensor,
         freqs_cis: torch.Tensor,
-        mask: AttentionBias,
+        mask,
     ) -> torch.Tensor:
         seqlen_sum, _ = x.shape
 
@@ -168,7 +173,7 @@ class TransformerBlock(nn.Module):
         self,
         x: torch.Tensor,
         freqs_cis: torch.Tensor,
-        att_mask: AttentionBias,
+        att_mask,
     ) -> torch.Tensor:
         r = self.attention(self.attention_norm(x), freqs_cis, att_mask)
         h = x + r
@@ -239,7 +244,7 @@ class Transformer(nn.Module):
 
         h = self.tok_embeddings(input_ids)
         positions = positions_from_sizes(seqlens, self.freqs_cis.device)
-        att_mask = BlockDiagonalCausalMask.from_seqlens(seqlens)
+        att_mask = self._get_masks(input_ids, seqlens)
 
         freqs_cis = self.freqs_cis[positions].to(device=h.device)
 
@@ -247,6 +252,17 @@ class Transformer(nn.Module):
             h = layer(h, freqs_cis, att_mask)
 
         return self.output(self.norm(h)).float()
+
+    def _get_masks(self, input_ids, seqlens):
+        if is_torch_nightly_installed():
+            from torch.nn.attention.flex_attention import create_block_mask
+            seq_ids = [seq_id for seq_id, length in enumerate(seqlens) for _ in range(length)]
+            prefix_lens = get_prefix_lens(input_ids)
+            mask_mod = generate_prefix_packed_mask_mod(seq_ids, prefix_lens)
+            return create_block_mask(mask_mod, None, None, self.max_seq_len, self.max_seq_len)
+        else:
+            from xformers.ops.fmha.attn_bias import BlockDiagonalCausalMask
+            return BlockDiagonalCausalMask.from_seqlens(seqlens)
 
 
 def positions_from_sizes(sizes: Iterable[int], device):
