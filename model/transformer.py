@@ -11,11 +11,19 @@ from .lora import LoRALinear
 from .moe import MoeLayer
 from .rope import apply_rotary_emb, precompute_freqs_cis
 
-def get_prefix_lens(input_ids, seqlens):
+def get_prefix_lens(input_ids, seqlens, seq_ids):
     END_SYS_TOKEN_ID = 11
-    prefix_lens = torch.where(input_ids == END_SYS_TOKEN_ID)[0] + 1
-    assert len(prefix_lens) == len(seqlens)
-    return prefix_lens
+    end_of_sys_idxs = torch.where(input_ids == END_SYS_TOKEN_ID)[0] + 1
+    sequences_with_end_sys = seq_ids[end_of_sys_idxs]
+
+    # Start index of all sequences
+    all_sequence_starts = torch.cumsum(torch.tensor([0] + seqlens[:-1], device=input_ids.device), dim=0)
+
+    # prefix lens of sequences with a system message
+    prefix_lens = end_of_sys_idxs - all_sequence_starts[sequences_with_end_sys]
+    all_prefix_lens = torch.zeros(len(seqlens), device=input_ids.device, dtype=prefix_lens.dtype)
+    all_prefix_lens[sequences_with_end_sys] = prefix_lens
+    return all_prefix_lens
 
 def is_torch_nightly_installed():
     return 'dev' in torch.__version__ or torch.__version__.endswith('+git')
@@ -31,8 +39,8 @@ def generate_prefix_packed_mask_mod(seq_ids, prefix_lens):
         kv_logical = kv_idx - offsets[seq_ids[kv_idx]]
 
         # prefix causal lm
-        inner_mask = kv_logical < prefix_lens[seq_ids[q_idx]] or q_logical >= kv_logical
-        return same_doc & inner_mask
+        inner_mask = torch.logical_or(kv_logical < prefix_lens[seq_ids[q_idx]], q_logical >= kv_logical)
+        return torch.logical_and(same_doc, inner_mask)
     return doc_mask_wrapper
 
 
@@ -256,10 +264,11 @@ class Transformer(nn.Module):
     def _get_masks(self, input_ids, seqlens):
         if is_torch_nightly_installed():
             from torch.nn.attention.flex_attention import create_block_mask
-            seq_ids = [seq_id for seq_id, length in enumerate(seqlens) for _ in range(length)]
-            prefix_lens = get_prefix_lens(input_ids)
+            seq_ids = torch.tensor([seq_id for seq_id, length in enumerate(seqlens) for _ in range(length)], device=input_ids.device)
+            prefix_lens = get_prefix_lens(input_ids, seqlens, seq_ids)
             mask_mod = generate_prefix_packed_mask_mod(seq_ids, prefix_lens)
-            return create_block_mask(mask_mod, None, None, self.max_seq_len, self.max_seq_len)
+            # TODO: Fix hard code
+            return create_block_mask(mask_mod, None, None, 8192, 8192)
         else:
             from xformers.ops.fmha.attn_bias import BlockDiagonalCausalMask
             return BlockDiagonalCausalMask.from_seqlens(seqlens)

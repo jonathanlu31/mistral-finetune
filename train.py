@@ -147,7 +147,7 @@ def _train(
     is_tekken = vocab_size > 32768
 
     if args.data.use_sys_tokens:
-        tokenizer_path = "/home/jonathan_lu/research/project/mistral-common/src/tokenizer_new.model.v3"
+        tokenizer_path = "/home/jonathan/research/project/mistral-common/src/tokenizer_new.model.v3"
         instruct_tokenizer = MistralTokenizer.from_file(tokenizer_path).instruct_tokenizer # type: ignore
     else:
         instruct_tokenizer: InstructTokenizerBase = MistralTokenizer.v3(
