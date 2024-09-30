@@ -11,6 +11,37 @@ from .lora import LoRALinear
 from .moe import MoeLayer
 from .rope import apply_rotary_emb, precompute_freqs_cis
 
+def is_torch_nightly_installed():
+    return 'dev' in torch.__version__ or torch.__version__.endswith('+git')
+
+_SUPPORTS_FLEX_ATTENTION = (
+    is_torch_nightly_installed()
+    and torch.cuda.is_available()
+    and torch.cuda.get_device_capability() >= (7, 5)
+)
+
+if _SUPPORTS_FLEX_ATTENTION:
+    from torch.nn.attention.flex_attention import (
+        BlockMask,
+        create_block_mask as create_block_causal_mask_flex,
+        flex_attention,
+    )
+
+    flex_attention_compiled = torch.compile(flex_attention, dynamic=False)
+
+    # We cannot do nested compile, but flex attention only has perf benefits
+    # when compiled. To insulate it from the compiler, we wrap it with
+    # compiler.disable so that it can be used regardless of whether the model
+    # is compiled or not, and flex attention always remains compiled.
+    @torch.compiler.disable(recursive=False)
+    def compile_friendly_flex_attention(
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        block_mask: BlockMask,
+    ) -> torch.Tensor:
+        return flex_attention_compiled(q, k, v, block_mask=block_mask)
+
 def get_prefix_lens(input_ids, seqlens, seq_ids):
     END_SYS_TOKEN_ID = 11
     end_of_sys_idxs = torch.where(input_ids == END_SYS_TOKEN_ID)[0] + 1
@@ -24,9 +55,6 @@ def get_prefix_lens(input_ids, seqlens, seq_ids):
     all_prefix_lens = torch.zeros(len(seqlens), device=input_ids.device, dtype=prefix_lens.dtype)
     all_prefix_lens[sequences_with_end_sys] = prefix_lens
     return all_prefix_lens
-
-def is_torch_nightly_installed():
-    return 'dev' in torch.__version__ or torch.__version__.endswith('+git')
 
 def generate_prefix_packed_mask_mod(seq_ids, prefix_lens):
     # Get unique document IDs and their counts
@@ -93,10 +121,8 @@ class Attention(nn.Module):
 
         self.wo = MaybeLora(args.n_heads * args.head_dim, args.dim, bias=False)
 
-        if is_torch_nightly_installed():
-            from torch.nn.attention.flex_attention import flex_attention
-            flex_attention = torch.compile(flex_attention, dynamic=False)
-            self.attn_op = lambda q,k,v,mask: flex_attention(q,k,v,block_mask=mask)
+        if _SUPPORTS_FLEX_ATTENTION:
+            self.attn_op = lambda q,k,v,mask: compile_friendly_flex_attention(q,k,v,block_mask=mask)
         else:
             from xformers.ops.fmha import memory_efficient_attention
             self.attn_op = lambda q,k,v,mask: memory_efficient_attention(q, k, v, mask)
@@ -262,7 +288,7 @@ class Transformer(nn.Module):
         return self.output(self.norm(h)).float()
 
     def _get_masks(self, input_ids, seqlens):
-        if is_torch_nightly_installed():
+        if _SUPPORTS_FLEX_ATTENTION:
             from torch.nn.attention.flex_attention import create_block_mask
             seq_ids = torch.tensor([seq_id for seq_id, length in enumerate(seqlens) for _ in range(length)], device=input_ids.device)
             prefix_lens = get_prefix_lens(input_ids, seqlens, seq_ids)
